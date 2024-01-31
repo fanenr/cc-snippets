@@ -1,47 +1,9 @@
 ---
 UseTab: Never
-IndentWidth: 4
-ColumnLimit: 80
-BasedOnStyle: LLVM
----
+BasedOnStyle: GNU
+SortIncludes: Never
+...
 
 ---
 Language: Cpp
-
-# cpp syle
-SortIncludes: Never                       # sort headers
-PointerAlignment: Left                    # pointer as a part of type: int* | int&&
-IndentGotoLabels: false                   # lable indent
-SpaceInEmptyBlock: true                   # space in empty block: { }
-AccessModifierOffset: -4                  # access modifier offset: public private protected
-SpaceAfterCStyleCast: true                # space after c-style cast: (int*) ptr
-Cpp11BracedListStyle: false               # c++11 braced list style: int a{ 1 }
-SpaceBeforeCpp11BracedList: true          # space before c++11 braced list style: int a { 1 }
-EmptyLineBeforeAccessModifier: Always     # insert an empty line before access modifier
-
-# alignment style
-AlignEscapedNewlines: Right               # align escaped new lines: \
-AlignAfterOpenBracket: Align              # align after open bracket: ()
-
-AlignTrailingComments:
-  Kind: Always
-  OverEmptyLines: 1
-
-AlignConsecutiveBitFields:
-  Enabled: true
-  AcrossEmptyLines: true
-  AcrossComments: true
-
-# single line
-AllowShortBlocksOnASingleLine: Empty
-AllowShortFunctionsOnASingleLine: Empty
-
-# about template
-AlwaysBreakTemplateDeclarations: Yes
-BreakBeforeConceptDeclarations: Always
-
-# braces wrap
-BraceWrapping:
-  AfterFunction: true
-BreakBeforeBraces: Custom
----
+...
