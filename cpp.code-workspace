@@ -10,20 +10,14 @@
 		"clangd.arguments": [
 			"--query-driver=/usr/bin/g++",
 			"--completion-style=detailed",
-			"--header-insertion=iwyu",
+			"--header-insertion=never",
 			"--all-scopes-completion",
 			"--background-index",
 			"--pch-storage=disk",
-			"--log=verbose",
-			"--clang-tidy",
-			"--pretty",
 			"-j=12"
 		],
 		"clangd.fallbackFlags": [
-			"-I/usr/lib/gcc/x86_64-redhat-linux/13/include",
-			"-I/usr/include/c++/13/x86_64-redhat-linux",
-			"-I/usr/include/c++/13/backward",
-			"-I/usr/include/c++/13",
+			"-I/usr/lib/gcc/x86_64-redhat-linux/14/include",
 			"-I/usr/local/include",
 			"-I/usr/include",
 			"-xc++"

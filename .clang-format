@@ -1,9 +1,3 @@
 ---
-UseTab: Never
 BasedOnStyle: GNU
-SortIncludes: Never
-...
-
----
-Language: Cpp
 ...
