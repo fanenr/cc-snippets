@@ -3,9 +3,10 @@
 #include <map>
 #include <string>
 
-int main()
+int
+main ()
 {
-    constexpr uint a = 1;
-    constexpr int b = -1;
-    constexpr bool r = b < a;
+  constexpr uint a = 1;
+  constexpr int b = -1;
+  constexpr bool r = b < a;
 }

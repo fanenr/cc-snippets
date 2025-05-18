@@ -4,13 +4,15 @@
 #include <ostream>
 #include <string>
 
-class data {
+class data
+{
 public:
-    int a;
+  int a;
 };
 
-int main()
+int
+main ()
 {
-    int a = 0;
-    int b = 0;
+  int a = 0;
+  int b = 0;
 }

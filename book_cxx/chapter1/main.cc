@@ -8,44 +8,57 @@
 using namespace arthur;
 namespace tool = ::util;
 
-std::string tool::str_hello()
+std::string
+tool::str_hello ()
 {
-    return "hello";
+  return "hello";
 }
 
-void func() { }
+void
+func ()
+{
+}
 
 // [[maybe_unused]] int get_int();
-[[nodiscard]] std::size_t get_int([[maybe_unused]] std::size_t len);
-class [[nodiscard]] A { };
-enum class [[nodiscard]] B { a };
-
-int main()
+[[nodiscard]] std::size_t get_int ([[maybe_unused]] std::size_t len);
+class [[nodiscard]] A
 {
-    using std::format;
-    using namespace tool;
-    using limit = std::numeric_limits<float>;
+};
+enum class [[nodiscard]] B
+{
+  a
+};
 
-    std::cout << format("{}\n", str_hello());
+int
+main ()
+{
+  using std::format;
+  using namespace tool;
+  using limit = std::numeric_limits<float>;
 
-    std::cout << format("float max: {}, min: {}, lowest: {}\n", limit::max(),
-                        limit::min(), limit::lowest());
+  std::cout << format ("{}\n", str_hello ());
 
-    auto size = sizeof(std::optional<int>);
+  std::cout << format ("float max: {}, min: {}, lowest: {}\n", limit::max (),
+		       limit::min (), limit::lowest ());
 
-    auto resu = get_int(-1);
+  auto size = sizeof (std::optional<int>);
 
-    std::cout << std::format("-1 to unsigned: {}\n", resu);
+  auto resu = get_int (-1);
+
+  std::cout << std::format ("-1 to unsigned: {}\n", resu);
 }
 
-std::size_t get_int(std::size_t len)
+std::size_t
+get_int (std::size_t len)
 {
-    return len;
+  return len;
 }
 
-namespace Ab {
+namespace Ab
+{
 
-namespace BB {
+namespace BB
+{
 
 }
 

@@ -49,13 +49,13 @@ template <typename T, Num K> struct tra_umap_k
   {
     if constexpr (K == Num::i32)
       std::cout << "traverse umap with key: i32 int"
-                << "\n";
+		<< "\n";
     if constexpr (K == Num::f32)
       std::cout << "traverse umap with key: f32 float"
-                << "\n";
+		<< "\n";
     if constexpr (K == Num::f64)
       std::cout << "traverse umap with key: f64 double"
-                << "\n";
+		<< "\n";
   }
 };
 

@@ -3,58 +3,63 @@
 #include <exception>
 #include <stdexcept>
 
-class exception {
+class exception
+{
 private:
-    int level;
+  int level;
 
 public:
-    exception() : level(1)
-    {
-        std::cout << "created" << std::endl;
-    }
+  exception () : level (1) { std::cout << "created" << std::endl; }
 
-    exception(exception const& other) : level(other.level + 1)
-    {
-        std::cout << "copied" << std::endl;
-    }
+  exception (exception const &other) : level (other.level + 1)
+  {
+    std::cout << "copied" << std::endl;
+  }
 
-    exception(exception&& other) : level(other.level + 1)
-    {
-        std::cout << "moved" << std::endl;
-    }
+  exception (exception &&other) : level (other.level + 1)
+  {
+    std::cout << "moved" << std::endl;
+  }
 
-    void show() const
-    {
-        std::cout << "level: " << level << std::endl;
-    }
+  void
+  show () const
+  {
+    std::cout << "level: " << level << std::endl;
+  }
 
-    virtual ~exception()
-    {
-        std::cout << "destoried: " << level << std::endl;
-    }
+  virtual ~exception () { std::cout << "destoried: " << level << std::endl; }
 };
 
-void func()
+void
+func ()
 {
-    throw exception();
+  throw exception ();
 }
 
-void indirection()
+void
+indirection ()
 {
-    // func();
-    try {
-        func();
-    } catch (exception const& e) {
-        throw e;
+  // func();
+  try
+    {
+      func ();
+    }
+  catch (exception const &e)
+    {
+      throw e;
     }
 }
 
-int main()
+int
+main ()
 {
-    try {
-        // func();
-        indirection();
-    } catch (exception const& e) {
-        e.show();
+  try
+    {
+      // func();
+      indirection ();
+    }
+  catch (exception const &e)
+    {
+      e.show ();
     }
 }

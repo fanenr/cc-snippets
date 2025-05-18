@@ -3,19 +3,21 @@
 #include <cstdint>
 #include <vector>
 
-struct data {
-    int a, b, c;
+struct data
+{
+  int a, b, c;
 
 private:
-    int d;
+  int d;
 };
 
-void fn()
+void
+fn ()
 {
-    std::array arr { 1, 2, 3 };
-    auto const& [x, y, z] = arr;
+  std::array arr{ 1, 2, 3 };
+  auto const &[x, y, z] = arr;
 
-    std::vector<int> vec(2, 0);
+  std::vector<int> vec (2, 0);
 
-    // auto [a, b, c] = data();
+  // auto [a, b, c] = data();
 }

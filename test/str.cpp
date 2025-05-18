@@ -3,12 +3,13 @@
 #include <string>
 #include <string_view>
 
-int main()
+int
+main ()
 {
 
-    auto cstr = "hello world";
-    std::string str(cstr, strlen(cstr));
-    std::string_view strv(cstr, strlen(cstr) - 6);
+  auto cstr = "hello world";
+  std::string str (cstr, strlen (cstr));
+  std::string_view strv (cstr, strlen (cstr) - 6);
 
-    std::cout << strv.data();
+  std::cout << strv.data ();
 }

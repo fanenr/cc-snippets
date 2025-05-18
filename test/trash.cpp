@@ -1,30 +1,25 @@
 #include <cstring>
 #include <iostream>
-class cstring {
+class cstring
+{
 
 private:
-    char* ptr;
+  char *ptr;
 
 public:
-    cstring()
-        : ptr(nullptr)
-    {
-    }
+  cstring () : ptr (nullptr) {}
 
-    cstring(char const* str)
-        : ptr(new char[strlen(str)])
-    {
-        strcpy(ptr, str);
-    }
+  cstring (char const *str) : ptr (new char[strlen (str)])
+  {
+    strcpy (ptr, str);
+  }
 
-    ~cstring()
-    {
-        delete[] ptr;
-    }
+  ~cstring () { delete[] ptr; }
 
-    friend std::istream& operator>>(std::istream& in, cstring& str)
-    {
+  friend std::istream &
+  operator>> (std::istream &in, cstring &str)
+  {
 
-        return in;
-    }
+    return in;
+  }
 };

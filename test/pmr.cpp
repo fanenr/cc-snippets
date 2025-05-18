@@ -7,28 +7,27 @@
 #include <string>
 #include <vector>
 
-struct T {
-    int32_t arr[10];
+struct T
+{
+  int32_t arr[10];
 
-    T() { }
+  T () {}
 
-    ~T()
-    {
-        std::cout << "destroied" << std::endl;
-    }
+  ~T () { std::cout << "destroied" << std::endl; }
 };
 
-int main()
+int
+main ()
 {
-    std::array<std::byte, 1024 * 100> buf;
-    std::pmr::monotonic_buffer_resource pool(buf.data(), buf.size());
+  std::array<std::byte, 1024 * 100> buf;
+  std::pmr::monotonic_buffer_resource pool (buf.data (), buf.size ());
 
-    {
-        std::pmr::vector<T> vec(std::pmr::new_delete_resource());
-        for (int i = 0; i < 10; ++i)
-            vec.emplace_back();
-        vec.clear();
-    }
+  {
+    std::pmr::vector<T> vec (std::pmr::new_delete_resource ());
+    for (int i = 0; i < 10; ++i)
+      vec.emplace_back ();
+    vec.clear ();
+  }
 
-    std::cout << "end" << std::endl;
+  std::cout << "end" << std::endl;
 }
