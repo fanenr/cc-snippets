@@ -9,9 +9,9 @@
 namespace mini_mpf
 {
 
-template <typename Enum, typename... Types> class type_umap
+template <typename Enum, typename... Types>
+class type_umap
 {
-
 public:
   // preserve type info of map and inner
   using self = type_umap<Enum, Types...>;
@@ -21,19 +21,22 @@ public:
 private:
   constexpr static std::size_t length = array::len ();
 
-  template <Enum Key> struct _at
+  template <Enum Key>
+  struct _at
   {
     using type = typename array::template at<static_cast<std::size_t> (Key)>;
   };
 
-  template <template <typename...> typename T> struct _forward
+  template <template <typename...> typename T>
+  struct _forward
   {
     using type = T<Types...>;
   };
 
 public:
   // at is used to get the type at Pos in a umap
-  template <Enum Key> using at = typename _at<Key>::type;
+  template <Enum Key>
+  using at = typename _at<Key>::type;
 
   // len will return the number of types
   constexpr static std::size_t
@@ -98,7 +101,7 @@ public:
     constexpr Enum key = static_cast<Enum> (Pos);
 
     if constexpr (Pos < length)
-      std::invoke (Func<at<key> > (), std::forward<Args> (args)...);
+      std::invoke (Func<at<key>> (), std::forward<Args> (args)...);
 
     if constexpr (Pos + 1 < length)
       for_each<Func, Pos + 1> (std::forward<Args> (args)...);
@@ -122,7 +125,7 @@ public:
 
 // type_umap also accept a type_array as its types pack
 template <typename Enum, typename... Types>
-class type_umap<Enum, type_array<Types...> >
+class type_umap<Enum, type_array<Types...>>
 {
 
 public:
@@ -134,19 +137,22 @@ public:
 private:
   constexpr static std::size_t length = array::len ();
 
-  template <Enum Key> struct _at
+  template <Enum Key>
+  struct _at
   {
     using type = typename array::template at<static_cast<std::size_t> (Key)>;
   };
 
-  template <template <typename...> typename T> struct _forward
+  template <template <typename...> typename T>
+  struct _forward
   {
     using type = T<Types...>;
   };
 
 public:
   // at is used to get the type at Pos in a umap
-  template <Enum Key> using at = typename _at<Key>::type;
+  template <Enum Key>
+  using at = typename _at<Key>::type;
 
   // len will return the number of types
   constexpr static std::size_t
@@ -211,7 +217,7 @@ public:
     constexpr Enum key = static_cast<Enum> (Pos);
 
     if constexpr (Pos < length)
-      std::invoke (Func<at<key> > (), std::forward<Args> (args)...);
+      std::invoke (Func<at<key>> (), std::forward<Args> (args)...);
 
     if constexpr (Pos + 1 < length)
       for_each<Func, Pos + 1> (std::forward<Args> (args)...);

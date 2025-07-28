@@ -12,16 +12,17 @@ test_array ()
 
   static_assert (3 == arr::len (), "bad");
   static_assert (arr::cmp<float &, 2> (), "bad");
-  static_assert (std::is_same_v<float &, arr::at<2> >, "bad");
+  static_assert (std::is_same_v<float &, arr::at<2>>, "bad");
 
   using tuple = std::tuple<int, double, float &>;
-  static_assert (std::is_same_v<tuple, arr::forward<std::tuple> >, "bad");
+  static_assert (std::is_same_v<tuple, arr::forward<std::tuple>>, "bad");
 
   static_assert (arr::find<float &> () == 2, "bad");
   static_assert (!arr::find_if<float> (), "bad");
 }
 
-template <typename T> struct tra_umap
+template <typename T>
+struct tra_umap
 {
   void
   operator() (double n)
@@ -42,7 +43,8 @@ enum class Num
   f64
 };
 
-template <typename T, Num K> struct tra_umap_k
+template <typename T, Num K>
+struct tra_umap_k
 {
   void
   operator() ()
@@ -66,14 +68,14 @@ test_umap ()
   using arr = umap::array;
   using umap2 = type_umap<Num, arr>;
 
-  static_assert (std::is_same_v<float, umap::at<Num::f32> >, "bad");
+  static_assert (std::is_same_v<float, umap::at<Num::f32>>, "bad");
 
   static_assert (3 == umap::len (), "bad");
 
   static_assert (umap::cmp<float, Num::f32> (), "bad");
 
   using tuple = std::tuple<int, float, double>;
-  static_assert (std::is_same_v<tuple, umap::forward<std::tuple> >, "bad");
+  static_assert (std::is_same_v<tuple, umap::forward<std::tuple>>, "bad");
 
   static_assert (!umap2::find_if<float &> (), "bad");
   static_assert (umap::find<float> () == Num::f32, "bad");

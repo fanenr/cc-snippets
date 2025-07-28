@@ -8,15 +8,17 @@
 namespace mini_mpf
 {
 
-template <typename... Types> class type_array
+template <typename... Types>
+class type_array
 {
-
 private:
   constexpr static size_t size = sizeof...(Types);
 
-  template <size_t Index, typename... Other> struct at_impl;
+  template <size_t Index, typename... Other>
+  struct at_impl;
 
-  template <typename T, typename... Other> struct at_impl<0, T, Other...>
+  template <typename T, typename... Other>
+  struct at_impl<0, T, Other...>
   {
     using type = T;
   };
@@ -27,13 +29,15 @@ private:
     using type = typename at_impl<Index - 1, Other...>::type;
   };
 
-  template <template <typename...> typename T> struct forward_impl
+  template <template <typename...> typename T>
+  struct forward_impl
   {
     using type = T<Types...>;
   };
 
 public:
-  template <size_t Index> using at = typename at_impl<Index, Types...>::type;
+  template <size_t Index>
+  using at = typename at_impl<Index, Types...>::type;
 
   template <template <typename...> typename T>
   using forward = typename forward_impl<T>::type;

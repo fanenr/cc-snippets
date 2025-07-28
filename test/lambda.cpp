@@ -13,7 +13,8 @@ fn2 (std::string str)
   std::cout << str << '\n';
 }
 
-template <typename Fn, typename... Args> class lambda
+template <typename Fn, typename... Args>
+class lambda
 {
 
 private:
