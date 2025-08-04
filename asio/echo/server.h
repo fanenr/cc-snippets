@@ -1,8 +1,6 @@
 #ifndef SERVER_H
 #define SERVER_H
 
-#include <memory>
-#include <vector>
 #include <boost/asio.hpp>
 
 namespace sys = boost::system;
