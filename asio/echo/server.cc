@@ -1,6 +1,7 @@
 #include "server.h"
 
 #include <thread>
+#include <list>
 
 std::atomic<bool> stop;
 
@@ -13,10 +14,13 @@ main ()
       stop = true;
   });
 
-  server srv (8080, 10);
-  srv.start ();
+  std::list<server> servers;
+  for (int i = 0; i < 10; i++)
+    servers.emplace_back (8080 + i).start ();
 
   for (; !stop;)
     std::this_thread::sleep_for (std::chrono::milliseconds (100));
-  srv.stop ();
+
+  for (auto &srv : servers)
+    srv.stop ();
 }

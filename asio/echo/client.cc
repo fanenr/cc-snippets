@@ -30,7 +30,7 @@ public:
   }
 
   void
-  connect (short port)
+  start (short port)
   {
     socket_.async_connect (
 	tcp::endpoint (tcp::v4 (), port),
@@ -38,6 +38,12 @@ public:
 	  handle_connect (ec);
 	});
   }
+
+private:
+  tcp::socket socket_;
+  std::string send_buffer_;
+  std::string recv_buffer_;
+  asio::steady_timer timer_;
 
   void
   start ()
@@ -48,14 +54,8 @@ public:
     asio::async_write (
 	socket_, asio::buffer (send_buffer_),
 	[this, self = shared_from_this ()] (
-	    const sys::error_code &ec, size_t n) { handle_send (ec, n); });
+	    const sys::error_code &ec, size_t n) { handle_write (ec, n); });
   }
-
-private:
-  tcp::socket socket_;
-  std::string send_buffer_;
-  std::string recv_buffer_;
-  asio::steady_timer timer_;
 
   void
   handle_connect (const sys::error_code &error)
@@ -80,7 +80,7 @@ private:
   }
 
   void
-  handle_send (const sys::error_code &error, size_t /*bytes*/)
+  handle_write (const sys::error_code &error, size_t /*bytes*/)
   {
     if (error)
       {
@@ -88,37 +88,19 @@ private:
 	return;
       }
 
-    socket_.async_receive (
-	asio::buffer (recv_buffer_),
+    asio::async_read (
+	socket_, asio::buffer (recv_buffer_),
 	[this, self = shared_from_this ()] (
-	    const sys::error_code &ec, size_t n) { handle_receive (ec, n); });
+	    const sys::error_code &ec, size_t n) { handle_read (ec, n); });
   }
 
   void
-  handle_receive (const sys::error_code &error, size_t bytes)
+  handle_read (const sys::error_code &error, size_t /*bytes*/)
   {
     if (error)
       {
 	handle_error ();
 	return;
-      }
-
-    recv_buffer_.resize (bytes);
-
-    for (;;)
-      {
-	char buff[1024];
-	sys::error_code ec;
-	size_t n = socket_.read_some (asio::buffer (buff), ec);
-
-	if (ec)
-	  {
-	    if (ec == asio::error::try_again || ec == asio::error::would_block)
-	      break;
-	    return;
-	  }
-
-	recv_buffer_.insert (recv_buffer_.end (), buff, buff + n);
       }
 
     if (recv_buffer_ == send_buffer_)
@@ -196,7 +178,8 @@ monitor ()
 
   print_line ();
   int total = echoes.load ();
-  printf (fmt, connected.load (), failed.load (), total, total / times);
+  int rate = (times == 0 ? 0 : total / times);
+  printf (fmt, connected.load (), failed.load (), total, rate);
 }
 
 int
@@ -211,30 +194,38 @@ main (int argc, char **argv)
   signal (SIGPIPE, SIG_IGN);
   signal (SIGINT, [] (int signum) {
     if (signum == SIGINT)
-      stop = true;
+      {
+	stop = true;
+	puts ("");
+      }
   });
 
-  asio::io_context io_context;
   connections = std::atoi (argv[1]);
-  for (int i = 0; i < connections; i++)
-    {
-      auto conn = connection::make (io_context);
-      conn->connect (8080 + i % 10);
-    }
+  std::vector<asio::io_context> io_contexts (10);
 
   std::vector<std::thread> worker_threads;
-  for (int i = 0; i < 4; i++)
-    worker_threads.emplace_back ([&] () {
+  for (auto &io_context : io_contexts)
+    worker_threads.emplace_back ([&io_context] () {
       auto work = asio::make_work_guard (io_context);
       io_context.run ();
     });
+
+  for (int i = 0; i < connections; i++)
+    {
+      auto &io_context = io_contexts[i % io_contexts.size ()];
+      asio::post (io_context, [port = 8080 + i % 10, &io_context] () {
+	connection::make (io_context)->start (port);
+      });
+    }
+
   std::thread monitor_thread (monitor);
 
   for (; !stop;)
     std::this_thread::sleep_for (std::chrono::milliseconds (100));
 
-  io_context.stop ();
+  for (auto &io : io_contexts)
+    io.stop ();
+  for (auto &thrd : worker_threads)
+    thrd.join ();
   monitor_thread.join ();
-  for (auto &t : worker_threads)
-    t.join ();
 }

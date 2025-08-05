@@ -83,11 +83,10 @@ private:
 class server
 {
 public:
-  explicit server (short port, int n = 1)
+  explicit server (short port)
+      : acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
   {
-    for (int i = 0; i < n; i++)
-      acceptors_.emplace_back (io_context_, tcp::endpoint (tcp::v4 (), port++))
-	  .non_blocking (true);
+    acceptor_.non_blocking (true);
   }
 
   ~server () { stop (); }
@@ -95,9 +94,9 @@ public:
   void
   start ()
   {
-    start_accept ();
     if (!thread_.joinable ())
       thread_ = std::thread ([this] () {
+	start_accept ();
 	auto work = asio::make_work_guard (io_context_);
 	io_context_.run ();
       });
@@ -119,26 +118,19 @@ public:
   }
 
 private:
-  std::thread thread_;
   asio::io_context io_context_;
-  std::vector<tcp::acceptor> acceptors_;
+  tcp::acceptor acceptor_;
+  std::thread thread_;
 
   void
   start_accept ()
   {
-    for (auto &acceptor : acceptors_)
-      start_accept (acceptor);
-  }
-
-  void
-  start_accept (tcp::acceptor &acceptor)
-  {
     auto conn = connection::make (io_context_);
-    acceptor.async_accept (
-	conn->socket (), [this, conn, &acceptor] (const sys::error_code &ec) {
-	  handle_accept (ec, conn);
-	  start_accept (acceptor);
-	});
+    acceptor_.async_accept (conn->socket (),
+			    [this, conn] (const sys::error_code &ec) {
+			      handle_accept (ec, conn);
+			      start_accept ();
+			    });
   }
 
   void
