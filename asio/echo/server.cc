@@ -1,4 +1,4 @@
-#include "server.h"
+#include "co_server.h"
 
 #include <thread>
 #include <list>
@@ -20,7 +20,4 @@ main ()
 
   for (; !stop;)
     std::this_thread::sleep_for (std::chrono::milliseconds (100));
-
-  for (auto &srv : servers)
-    srv.stop ();
 }

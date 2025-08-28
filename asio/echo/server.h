@@ -12,19 +12,13 @@ class connection : public std::enable_shared_from_this<connection>
 public:
   using pointer = std::shared_ptr<connection>;
 
-  connection (asio::io_context &io_context) : socket_ (io_context) {}
-
   static pointer
-  make (asio::io_context &io_context)
+  make (asio::io_context &io)
   {
-    return std::make_shared<connection> (io_context);
+    return std::make_shared<connection> (io);
   }
 
-  tcp::socket &
-  socket ()
-  {
-    return socket_;
-  }
+  explicit connection (asio::io_context &io) : socket_ (io) {}
 
   void
   start ()
@@ -37,9 +31,6 @@ public:
   }
 
 private:
-  tcp::socket socket_;
-  std::vector<char> buffer_;
-
   void
   handle_receive (const sys::error_code &error, size_t bytes)
   {
@@ -47,23 +38,6 @@ private:
       return;
 
     buffer_.resize (bytes);
-
-    for (;;)
-      {
-	char buff[1024];
-	sys::error_code ec;
-	size_t n = socket_.read_some (asio::buffer (buff), ec);
-
-	if (ec)
-	  {
-	    if (ec == asio::error::try_again || ec == asio::error::would_block)
-	      break;
-	    return;
-	  }
-
-	buffer_.insert (buffer_.end (), buff, buff + n);
-      }
-
     asio::async_write (
 	socket_, asio::buffer (buffer_),
 	[this, self = shared_from_this ()] (
@@ -78,6 +52,11 @@ private:
 
     start ();
   }
+
+private:
+  tcp::socket socket_;
+  std::vector<char> buffer_;
+  friend class server;
 };
 
 class server
@@ -86,7 +65,6 @@ public:
   explicit server (short port)
       : acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
   {
-    acceptor_.non_blocking (true);
   }
 
   ~server () { stop (); }
@@ -103,13 +81,6 @@ public:
   }
 
   void
-  wait ()
-  {
-    if (thread_.joinable ())
-      thread_.join ();
-  }
-
-  void
   stop ()
   {
     io_context_.stop ();
@@ -117,31 +88,32 @@ public:
       thread_.join ();
   }
 
-private:
-  asio::io_context io_context_;
-  tcp::acceptor acceptor_;
-  std::thread thread_;
-
   void
   start_accept ()
   {
     auto conn = connection::make (io_context_);
-    acceptor_.async_accept (conn->socket (),
+    acceptor_.async_accept (conn->socket_,
 			    [this, conn] (const sys::error_code &ec) {
 			      handle_accept (ec, conn);
-			      start_accept ();
 			    });
   }
 
+private:
   void
-  handle_accept (const sys::error_code &error, connection::pointer connection)
+  handle_accept (const sys::error_code &error, connection::pointer conn)
   {
     if (error)
       throw sys::system_error (error);
 
-    connection->socket ().non_blocking (true);
-    connection->start ();
+    conn->start ();
+
+    start_accept ();
   }
+
+private:
+  asio::io_context io_context_;
+  tcp::acceptor acceptor_;
+  std::thread thread_;
 };
 
 #endif // SERVER_H
