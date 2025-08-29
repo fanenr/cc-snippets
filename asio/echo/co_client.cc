@@ -1,4 +1,3 @@
-#include <boost/asio/any_io_executor.hpp>
 #include <thread>
 
 #include <boost/asio.hpp>
@@ -15,73 +14,77 @@ std::atomic<int> failed;
 std::atomic<int> connected;
 std::atomic<int> completed;
 
-class connection : public std::enable_shared_from_this<connection>
+void monitor ();
+
+void
+handle_spawn (std::exception_ptr e)
+{
+  if (e)
+    std::rethrow_exception (e);
+}
+
+class session : public std::enable_shared_from_this<session>
 {
 public:
-  using pointer = std::shared_ptr<connection>;
+  using pointer = std::shared_ptr<session>;
 
   static pointer
   make (asio::io_context &io)
   {
-    return std::make_shared<connection> (io);
+    return std::make_shared<session> (io);
   }
 
-  explicit connection (asio::io_context &io)
+  explicit session (asio::io_context &io)
       : socket_ (io, tcp::v4 ()), timer_ (io)
   {
   }
 
   void
-  start (short port, asio::any_io_executor ex)
+  start (short port, asio::yield_context yield)
   {
-    auto self = shared_from_this ();
-    auto go = [this, port, self] (asio::yield_context yield) {
-      sys::error_code ec;
+    sys::error_code ec;
 
-      // connect
-      socket_.async_connect (tcp::endpoint (tcp::v4 (), port), yield[ec]);
-      completed++;
-      if (ec)
-	{
-	  failed++;
-	  return;
-	}
-      connected++;
+    // connect
+    socket_.async_connect (tcp::endpoint (tcp::v4 (), port), yield[ec]);
+    completed++;
+    if (ec)
+      {
+	failed++;
+	return;
+      }
+    connected++;
 
-      // echo
-      for (;;)
-	{
-	  // send
-	  send_buffer_ = "Hello world!";
-	  recv_buffer_.resize (send_buffer_.size ());
-	  asio::async_write (socket_, asio::buffer (send_buffer_), yield[ec]);
-	  if (ec)
-	    {
-	      connected--;
-	      failed++;
-	      break;
-	    }
+    // echo
+    for (;;)
+      {
+	// send
+	send_buffer_ = "Hello world!";
+	recv_buffer_.resize (send_buffer_.size ());
+	asio::async_write (socket_, asio::buffer (send_buffer_), yield[ec]);
+	if (ec)
+	  {
+	    connected--;
+	    failed++;
+	    break;
+	  }
 
-	  // recv
-	  asio::async_read (socket_, asio::buffer (recv_buffer_), yield[ec]);
-	  if (ec)
-	    {
-	      connected--;
-	      failed++;
-	      break;
-	    }
+	// recv
+	asio::async_read (socket_, asio::buffer (recv_buffer_), yield[ec]);
+	if (ec)
+	  {
+	    connected--;
+	    failed++;
+	    break;
+	  }
 
-	  // check
-	  if (recv_buffer_ == send_buffer_)
-	    echoes++;
+	// check
+	if (recv_buffer_ == send_buffer_)
+	  echoes++;
 
-	  // delay
-	  timer_.expires_after (asio::chrono::seconds (1));
-	  timer_.async_wait (yield[ec]);
-	}
-    };
-
-    asio::spawn (ex, go, asio::detached);
+	// delay
+	timer_.expires_after (asio::chrono::seconds (1));
+	timer_.async_wait (yield[ec]);
+      }
   }
 
 private:
@@ -90,6 +93,68 @@ private:
   std::string recv_buffer_;
   asio::steady_timer timer_;
 };
+
+int
+main (int argc, char **argv)
+{
+  if (argc != 2)
+    {
+      printf ("Usage: %s <connections>\n", argv[0]);
+      return 1;
+    }
+
+  signal (SIGPIPE, SIG_IGN);
+  signal (SIGINT, [] (int signum) {
+    if (signum == SIGINT)
+      {
+	stop = true;
+	puts ("");
+      }
+  });
+
+  connections = std::atoi (argv[1]);
+  std::vector<std::thread> echo_thrds;
+  std::vector<asio::io_context> ctxs (10);
+
+  for (int i = 0; i < 10; i++)
+    {
+      auto &io = ctxs[i];
+      short port = 8080 + i;
+      echo_thrds.emplace_back ([&io, port] () {
+	try
+	  {
+	    int conns = connections / 10;
+	    conns += !!(connections % 10);
+
+	    for (int j = 0; j < conns; j++)
+	      {
+		auto sess = session::make (io);
+		auto go = [sess, port] (asio::yield_context yield) {
+		  sess->start (port, yield);
+		};
+		asio::spawn (io, go, handle_spawn);
+	      }
+
+	    io.run ();
+	  }
+	catch (const std::exception &e)
+	  {
+	    printf ("Exception: %s\n", e.what ());
+	  }
+      });
+    }
+
+  std::thread monitor_thrd (monitor);
+
+  for (; !stop;)
+    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+
+  for (auto &io : ctxs)
+    io.stop ();
+  for (auto &thrd : echo_thrds)
+    thrd.join ();
+  monitor_thrd.join ();
+}
 
 void
 monitor ()
@@ -147,49 +212,4 @@ monitor ()
   int total = echoes.load ();
   int rate = (times == 0 ? 0 : total / times);
   printf (fmt, connected.load (), failed.load (), total, rate);
-}
-
-int
-main (int argc, char **argv)
-{
-  if (argc != 2)
-    {
-      printf ("Usage: %s <connections>\n", argv[0]);
-      return 1;
-    }
-
-  signal (SIGPIPE, SIG_IGN);
-  signal (SIGINT, [] (int signum) {
-    if (signum == SIGINT)
-      {
-	stop = true;
-	puts ("");
-      }
-  });
-
-  connections = std::atoi (argv[1]);
-  std::vector<std::thread> echo_thrds;
-  std::vector<asio::io_context> ctxs (10);
-
-  for (int i = 0; i < connections; i++)
-    {
-      auto &io = ctxs[i % ctxs.size ()];
-      asio::post (io, [port = 8080 + i % 10, &io] () {
-	connection::make (io)->start (port, io.get_executor ());
-      });
-    }
-
-  for (auto &io : ctxs)
-    echo_thrds.emplace_back ([&io] () { io.run (); });
-
-  std::thread monitor_thrd (monitor);
-
-  for (; !stop;)
-    std::this_thread::sleep_for (std::chrono::milliseconds (100));
-
-  for (auto &io : ctxs)
-    io.stop ();
-  for (auto &thrd : echo_thrds)
-    thrd.join ();
-  monitor_thrd.join ();
 }

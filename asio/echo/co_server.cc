@@ -2,10 +2,18 @@
 #include <thread>
 
 #include <boost/asio.hpp>
+#include <boost/asio/spawn.hpp>
 
 namespace sys = boost::system;
 namespace asio = boost::asio;
 using asio::ip::tcp;
+
+void
+handle_spawn (std::exception_ptr e)
+{
+  if (e)
+    std::rethrow_exception (e);
+}
 
 class session : public std::enable_shared_from_this<session>
 {
@@ -15,44 +23,29 @@ public:
   static pointer
   make (tcp::socket sock)
   {
-    return std::make_shared<session> (sock);
+    return std::make_shared<session> (std::move (sock));
   }
 
   explicit session (tcp::socket sock) : socket_ (std::move (sock)) {}
 
   void
-  start ()
+  start (asio::yield_context yield)
   {
-    buffer_.resize (1024);
-    auto self = shared_from_this ();
-    socket_.async_receive (asio::buffer (buffer_),
-			   [this, self] (const sys::error_code &ec, size_t n) {
-			     handle_receive (ec, n);
-			   });
-  }
+    for (;;)
+      {
+	size_t n;
+	sys::error_code ec;
 
-private:
-  void
-  handle_receive (const sys::error_code &error, size_t bytes)
-  {
-    if (error)
-      return;
+	buffer_.resize (1024);
+	n = socket_.async_receive (asio::buffer (buffer_), yield[ec]);
+	if (ec)
+	  break;
 
-    buffer_.resize (bytes);
-    auto self = shared_from_this ();
-    asio::async_write (socket_, asio::buffer (buffer_),
-		       [this, self] (const sys::error_code &ec, size_t n) {
-			 handle_write (ec, n);
-		       });
-  }
-
-  void
-  handle_write (const sys::error_code &error, size_t /*bytes*/)
-  {
-    if (error)
-      return;
-
-    start ();
+	buffer_.resize (n);
+	n = asio::async_write (socket_, asio::buffer (buffer_), yield[ec]);
+	if (ec)
+	  break;
+      }
   }
 
 private:
@@ -73,11 +66,28 @@ public:
   void
   start ()
   {
+    auto go = [this] (asio::yield_context yield) {
+      for (;;)
+	{
+	  auto sock = acceptor_.async_accept (yield);
+	  auto sess = session::make (std::move (sock));
+	  auto go
+	      = [sess] (asio::yield_context yield) { sess->start (yield); };
+	  asio::spawn (io_context_, go, handle_spawn);
+	}
+    };
+
     if (!thread_.joinable ())
-      thread_ = std::thread ([this] () {
-	start_accept ();
-	auto work = asio::make_work_guard (io_context_);
-	io_context_.run ();
+      thread_ = std::thread ([this, go] () {
+	try
+	  {
+	    asio::spawn (io_context_, go, handle_spawn);
+	    io_context_.run ();
+	  }
+	catch (const std::exception &e)
+	  {
+	    printf ("Exception: %s\n", e.what ());
+	  }
       });
   }
 
@@ -87,28 +97,6 @@ public:
     io_context_.stop ();
     if (thread_.joinable ())
       thread_.join ();
-  }
-
-  void
-  start_accept ()
-  {
-    acceptor_.async_accept (
-	[this] (const sys::error_code &ec, tcp::socket sock) {
-	  handle_accept (ec, std::move (sock));
-	});
-  }
-
-private:
-  void
-  handle_accept (const sys::error_code &error, tcp::socket sock)
-  {
-    if (error)
-      throw sys::system_error (error);
-
-    auto sess = session::make (std::move (sock));
-    sess->start ();
-
-    start_accept ();
   }
 
 private:
