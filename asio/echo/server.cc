@@ -1,3 +1,6 @@
+#include <boost/asio/signal_set.hpp>
+#include <boost/system/detail/error_code.hpp>
+#include <csignal>
 #include <list>
 #include <thread>
 
@@ -15,7 +18,7 @@ public:
   static pointer
   make (tcp::socket sock)
   {
-    return std::make_shared<session> (sock);
+    return std::make_shared<session> (std::move (sock));
   }
 
   explicit session (tcp::socket sock) : socket_ (std::move (sock)) {}
@@ -64,11 +67,17 @@ class server
 {
 public:
   explicit server (short port)
-      : acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
+      : signals_ (io_context_, SIGINT, SIGTERM, SIGPIPE),
+	acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
   {
+    wait_signals ();
   }
 
-  ~server () { stop (); }
+  ~server ()
+  {
+    stop ();
+    wait ();
+  }
 
   void
   start ()
@@ -76,17 +85,22 @@ public:
     if (!thread_.joinable ())
       thread_ = std::thread ([this] () {
 	start_accept ();
-	auto work = asio::make_work_guard (io_context_);
 	io_context_.run ();
       });
   }
 
   void
-  stop ()
+  wait ()
   {
-    io_context_.stop ();
     if (thread_.joinable ())
       thread_.join ();
+  }
+
+  void
+  stop ()
+  {
+    if (!io_context_.stopped ())
+      io_context_.stop ();
   }
 
   void
@@ -99,6 +113,33 @@ public:
   }
 
 private:
+  void
+  wait_signals ()
+  {
+    signals_.async_wait ([this] (const sys::error_code &ec, int sig) {
+      handle_signals (ec, sig);
+    });
+  }
+
+  void
+  handle_signals (const sys::error_code &error, int signum)
+  {
+    if (error)
+      return;
+
+    switch (signum)
+      {
+      case SIGINT:
+      case SIGTERM:
+	stop ();
+	break;
+
+      default:
+	wait_signals ();
+	break;
+      }
+  }
+
   void
   handle_accept (const sys::error_code &error, tcp::socket sock)
   {
@@ -113,6 +154,7 @@ private:
 
 private:
   asio::io_context io_context_;
+  asio::signal_set signals_;
   tcp::acceptor acceptor_;
   std::thread thread_;
 };
@@ -122,19 +164,12 @@ std::atomic<bool> stop;
 int
 main ()
 {
-  signal (SIGPIPE, SIG_IGN);
-  signal (SIGINT, [] (int signum) {
-    if (signum == SIGINT)
-      stop = true;
-  });
-
   std::list<server> servers;
   for (int i = 0; i < 10; i++)
     {
       servers.emplace_back (8080 + i);
       servers.back ().start ();
     }
-
-  for (; !stop;)
-    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+  for (auto &srv : servers)
+    srv.wait ();
 }

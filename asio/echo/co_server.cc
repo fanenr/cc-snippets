@@ -3,10 +3,15 @@
 
 #include <boost/asio.hpp>
 #include <boost/asio/spawn.hpp>
+#include <boost/context/fixedsize_stack.hpp>
+#include <boost/context/pooled_fixedsize_stack.hpp>
 
 namespace sys = boost::system;
 namespace asio = boost::asio;
 using asio::ip::tcp;
+
+using allocator_t = boost::context::fixedsize_stack;
+allocator_t allocator (8 * 1024);
 
 void
 handle_spawn (std::exception_ptr e)
@@ -73,7 +78,8 @@ public:
 	  auto sess = session::make (std::move (sock));
 	  auto go
 	      = [sess] (asio::yield_context yield) { sess->start (yield); };
-	  asio::spawn (io_context_, go, handle_spawn);
+	  asio::spawn (io_context_, asio::allocator_arg_t (), allocator, go,
+		       handle_spawn);
 	}
     };
 
@@ -81,7 +87,8 @@ public:
       thread_ = std::thread ([this, go] () {
 	try
 	  {
-	    asio::spawn (io_context_, go, handle_spawn);
+	    asio::spawn (io_context_, asio::allocator_arg_t (), allocator, go,
+			 handle_spawn);
 	    io_context_.run ();
 	  }
 	catch (const std::exception &e)
