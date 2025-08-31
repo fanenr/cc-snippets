@@ -1,6 +1,3 @@
-#include <boost/asio/signal_set.hpp>
-#include <boost/system/detail/error_code.hpp>
-#include <csignal>
 #include <list>
 #include <thread>
 
@@ -84,8 +81,15 @@ public:
   {
     if (!thread_.joinable ())
       thread_ = std::thread ([this] () {
-	start_accept ();
-	io_context_.run ();
+	try
+	  {
+	    start_accept ();
+	    io_context_.run ();
+	  }
+	catch (const std::exception &e)
+	  {
+	    printf ("Exception: %s\n", e.what ());
+	  }
       });
   }
 
@@ -124,20 +128,10 @@ private:
   void
   handle_signals (const sys::error_code &error, int signum)
   {
-    if (error)
-      return;
-
-    switch (signum)
-      {
-      case SIGINT:
-      case SIGTERM:
-	stop ();
-	break;
-
-      default:
-	wait_signals ();
-	break;
-      }
+    if (!error && (signum == SIGINT || signum == SIGTERM))
+      stop ();
+    else
+      wait_signals ();
   }
 
   void
@@ -158,8 +152,6 @@ private:
   tcp::acceptor acceptor_;
   std::thread thread_;
 };
-
-std::atomic<bool> stop;
 
 int
 main ()

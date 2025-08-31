@@ -62,33 +62,50 @@ class server
 {
 public:
   explicit server (short port)
-      : acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
+      : signals_ (io_context_, SIGINT, SIGTERM, SIGPIPE),
+	acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
   {
   }
 
-  ~server () { stop (); }
+  ~server ()
+  {
+    stop ();
+    wait ();
+  }
 
   void
   start ()
   {
-    auto go = [this] (asio::yield_context yield) {
+    auto signal = [this] (asio::yield_context yield) {
+      for (;;)
+	{
+	  sys::error_code ec;
+	  int sig = signals_.async_wait (yield[ec]);
+	  if (!ec && (sig == SIGINT || sig == SIGTERM))
+	    stop ();
+	}
+    };
+
+    auto listen = [this] (asio::yield_context yield) {
       for (;;)
 	{
 	  auto sock = acceptor_.async_accept (yield);
 	  auto sess = session::make (std::move (sock));
-	  auto go
+	  auto echo
 	      = [sess] (asio::yield_context yield) { sess->start (yield); };
-	  asio::spawn (io_context_, asio::allocator_arg_t (), allocator, go,
+	  asio::spawn (io_context_, asio::allocator_arg_t (), allocator, echo,
 		       handle_spawn);
 	}
     };
 
     if (!thread_.joinable ())
-      thread_ = std::thread ([this, go] () {
+      thread_ = std::thread ([this, signal, listen] () {
 	try
 	  {
-	    asio::spawn (io_context_, asio::allocator_arg_t (), allocator, go,
-			 handle_spawn);
+	    asio::spawn (io_context_, asio::allocator_arg_t (), allocator,
+			 signal, handle_spawn);
+	    asio::spawn (io_context_, asio::allocator_arg_t (), allocator,
+			 listen, handle_spawn);
 	    io_context_.run ();
 	  }
 	catch (const std::exception &e)
@@ -99,37 +116,35 @@ public:
   }
 
   void
-  stop ()
+  wait ()
   {
-    io_context_.stop ();
     if (thread_.joinable ())
       thread_.join ();
   }
 
+  void
+  stop ()
+  {
+    if (!io_context_.stopped ())
+      io_context_.stop ();
+  }
+
 private:
   asio::io_context io_context_;
+  asio::signal_set signals_;
   tcp::acceptor acceptor_;
   std::thread thread_;
 };
 
-std::atomic<bool> stop;
-
 int
 main ()
 {
-  signal (SIGPIPE, SIG_IGN);
-  signal (SIGINT, [] (int signum) {
-    if (signum == SIGINT)
-      stop = true;
-  });
-
   std::list<server> servers;
   for (int i = 0; i < 10; i++)
     {
       servers.emplace_back (8080 + i);
       servers.back ().start ();
     }
-
-  for (; !stop;)
-    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+  for (auto &srv : servers)
+    srv.wait ();
 }
