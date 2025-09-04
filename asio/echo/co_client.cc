@@ -137,7 +137,7 @@ main (int argc, char **argv)
 		auto go = [sess, port] (asio::yield_context yield) {
 		  sess->start (port, yield);
 		};
-		asio::spawn (io, asio::allocator_arg_t (), allocator, go,
+		asio::spawn (io, std::allocator_arg, allocator, go,
 			     handle_spawn);
 	      }
 

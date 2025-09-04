@@ -102,10 +102,10 @@ public:
       thread_ = std::thread ([this, signal, listen] () {
 	try
 	  {
-	    asio::spawn (io_context_, asio::allocator_arg_t (), allocator,
-			 signal, handle_spawn);
-	    asio::spawn (io_context_, asio::allocator_arg_t (), allocator,
-			 listen, handle_spawn);
+	    asio::spawn (io_context_, std::allocator_arg, allocator, signal,
+			 handle_spawn);
+	    asio::spawn (io_context_, std::allocator_arg, allocator, listen,
+			 handle_spawn);
 	    io_context_.run ();
 	  }
 	catch (const std::exception &e)
