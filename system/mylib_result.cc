@@ -1,11 +1,9 @@
 #include "mylib_error.h"
 
-namespace sys = boost::system;
-
 namespace mylib
 {
 
-inline sys::result<void>
+inline boost::system::result<void>
 foo (int v) noexcept
 {
   switch (v)
@@ -25,32 +23,35 @@ foo (int v) noexcept
 
 } // namespace mylib
 
+// namespace sys = boost::system;
+
 void
 test_foo ()
 {
   auto res = mylib::foo (3);
 
   // error_code
-  assert (res.has_error ());
   auto ec = res.error ();
-  assert (ec == mylib::error::type2_a);
-  assert (ec == mylib::condition::type2);
+  BOOST_ASSERT (res.has_error ());
+  BOOST_ASSERT (ec == mylib::error::type2_a);
+  BOOST_ASSERT (ec == mylib::condition::type2);
 
-  assert (!res);
-  assert (!res.has_value ());
+  BOOST_ASSERT (!res);
+  BOOST_ASSERT (!res.has_value ());
 
   // exception
   bool thrown = false;
   try
     {
-      res.value (); // not *res
+      res.value ();
+      // not *res: if res has no value, *res is UB
     }
   catch (const std::exception &e)
     {
       printf ("exception: %s\n", e.what ());
       thrown = true;
     }
-  assert (thrown);
+  BOOST_ASSERT (thrown);
 }
 
 int

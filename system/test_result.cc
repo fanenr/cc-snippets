@@ -1,7 +1,5 @@
 #include <boost/system.hpp>
 
-namespace sys = boost::system;
-
 namespace my
 {
 
@@ -19,13 +17,15 @@ throw_exception_from_error (const error &e, const boost::source_location &loc)
 
 } // namespace my
 
-sys::result<void, my::error>
+boost::system::result<void, my::error>
 foo (bool v)
 {
   if (v)
     return {};
   return my::error{ "bad" };
 }
+
+// namespace sys = boost::system;
 
 int
 main ()
@@ -34,6 +34,7 @@ main ()
     {
       auto res = foo (false);
       res.value ();
+      // not *res: if res has no value, *res is UB
     }
   catch (const std::exception &e)
     {

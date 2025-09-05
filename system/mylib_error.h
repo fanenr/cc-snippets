@@ -21,7 +21,7 @@ class error_category_impl : public boost::system::error_category
 public:
   const char *name () const noexcept;
   std::string message (int ev) const;
-  char const *message (int ev, char *buffer, std::size_t len) const noexcept;
+  const char *message (int ev, char *buffer, std::size_t len) const noexcept;
 
   boost::system::error_condition
   default_error_condition (int ev) const noexcept;
@@ -43,7 +43,7 @@ class condition_category_impl : public boost::system::error_category
 public:
   const char *name () const noexcept;
   std::string message (int ev) const;
-  char const *message (int ev, char *buffer, std::size_t len) const noexcept;
+  const char *message (int ev, char *buffer, std::size_t len) const noexcept;
 };
 
 const boost::system::error_category &condition_category ();
@@ -100,7 +100,7 @@ error_category_impl::message (int ev) const
   return message (ev, buffer, sizeof (buffer));
 }
 
-inline char const *
+inline const char *
 error_category_impl::message (int ev, char *buffer,
 			      std::size_t len) const noexcept
 {
@@ -169,7 +169,7 @@ condition_category_impl::message (int ev) const
   return message (ev, buffer, sizeof (buffer));
 }
 
-inline char const *
+inline const char *
 condition_category_impl::message (int ev, char *buffer,
 				  std::size_t len) const noexcept
 {
