@@ -12,19 +12,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Boost REQUIRED COMPONENTS context)
 
 add_executable(server server.cc)
-target_compile_definitions(server
-  PRIVATE
-    BOOST_ASIO_HAS_IO_URING=1
-    BOOST_ASIO_DISABLE_EPOLL=1
-)
+# target_compile_definitions(server
+#   PRIVATE
+#     BOOST_ASIO_HAS_IO_URING=1
+#     BOOST_ASIO_DISABLE_EPOLL=1
+# )
 target_link_libraries(server PRIVATE uring)
 
 add_executable(client client.cc)
-target_compile_definitions(client
-  PRIVATE
-    BOOST_ASIO_HAS_IO_URING=1
-    BOOST_ASIO_DISABLE_EPOLL=1
-)
+# target_compile_definitions(client
+#   PRIVATE
+#     BOOST_ASIO_HAS_IO_URING=1
+#     BOOST_ASIO_DISABLE_EPOLL=1
+# )
 target_link_libraries(client PRIVATE uring)
 
 add_executable(co_server co_server.cc)

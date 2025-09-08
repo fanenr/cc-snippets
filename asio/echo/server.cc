@@ -5,7 +5,11 @@
 
 namespace sys = boost::system;
 namespace asio = boost::asio;
+namespace chrono = asio::chrono;
 using asio::ip::tcp;
+
+constexpr chrono::seconds default_timeout (5);
+constexpr size_t max_receive = 1024;
 
 class session : public std::enable_shared_from_this<session>
 {
@@ -18,45 +22,96 @@ public:
     return std::make_shared<session> (std::move (sock));
   }
 
-  explicit session (tcp::socket sock) : socket_ (std::move (sock)) {}
+  explicit session (tcp::socket sock,
+		    chrono::seconds timeout = default_timeout)
+      : socket_ (std::move (sock)), timer_ (socket_.get_executor ()),
+	strand_ (static_cast<asio::io_context &> (
+	    socket_.get_executor ().context ())),
+	timeout_ (timeout)
+  {
+  }
 
   void
   start ()
   {
-    buffer_.resize (1024);
-    auto self = shared_from_this ();
-    socket_.async_receive (asio::buffer (buffer_),
-			   [this, self] (const sys::error_code &ec, size_t n) {
-			     handle_receive (ec, n);
-			   });
+    buffer_.resize (max_receive);
+    start_receive ();
   }
 
 private:
+  void
+  start_receive ()
+  {
+    auto self = shared_from_this ();
+    socket_.async_receive (
+	asio::buffer (buffer_),
+	asio::bind_executor (
+	    strand_, [this, self] (const sys::error_code &ec, size_t n) {
+	      handle_receive (ec, n);
+	    }));
+
+    wait_timeout ();
+  }
+
   void
   handle_receive (const sys::error_code &error, size_t bytes)
   {
     if (error)
       return;
 
+    timer_.cancel ();
+
     buffer_.resize (bytes);
-    auto self = shared_from_this ();
-    asio::async_write (socket_, asio::buffer (buffer_),
-		       [this, self] (const sys::error_code &ec, size_t n) {
-			 handle_write (ec, n);
-		       });
+    start_send ();
   }
 
   void
-  handle_write (const sys::error_code &error, size_t /*bytes*/)
+  start_send ()
+  {
+    auto self = shared_from_this ();
+    asio::async_write (
+	socket_, asio::buffer (buffer_),
+	asio::bind_executor (
+	    strand_, [this, self] (const sys::error_code &ec, size_t n) {
+	      handle_send (ec, n);
+	    }));
+
+    wait_timeout ();
+  }
+
+  void
+  handle_send (const sys::error_code &error, size_t /*bytes*/)
   {
     if (error)
       return;
 
+    timer_.cancel ();
+
     start ();
+  }
+
+  void
+  wait_timeout ()
+  {
+    auto self = shared_from_this ();
+    timer_.expires_after (timeout_);
+    timer_.async_wait (asio::bind_executor (
+	strand_,
+	[this, self] (const sys::error_code &ec) { handle_timeout (ec); }));
+  }
+
+  void
+  handle_timeout (const sys::error_code &error)
+  {
+    if (!error)
+      socket_.cancel ();
   }
 
 private:
   tcp::socket socket_;
+  asio::steady_timer timer_;
+  asio::io_context::strand strand_;
+  decltype (timer_)::duration timeout_;
   std::vector<char> buffer_;
 };
 
@@ -79,18 +134,20 @@ public:
   void
   start ()
   {
-    if (!thread_.joinable ())
-      thread_ = std::thread ([this] () {
-	try
-	  {
-	    start_accept ();
-	    io_context_.run ();
-	  }
-	catch (const std::exception &e)
-	  {
-	    printf ("Exception: %s\n", e.what ());
-	  }
-      });
+    if (thread_.joinable ())
+      return;
+
+    thread_ = std::thread ([this] () {
+      try
+	{
+	  start_accept ();
+	  io_context_.run ();
+	}
+      catch (const std::exception &e)
+	{
+	  printf ("Exception: %s\n", e.what ());
+	}
+    });
   }
 
   void
@@ -107,6 +164,7 @@ public:
       io_context_.stop ();
   }
 
+private:
   void
   start_accept ()
   {
@@ -116,7 +174,18 @@ public:
 	});
   }
 
-private:
+  void
+  handle_accept (const sys::error_code &error, tcp::socket sock)
+  {
+    if (error)
+      throw sys::system_error (error);
+
+    auto sess = session::make (std::move (sock));
+    sess->start ();
+
+    start_accept ();
+  }
+
   void
   wait_signals ()
   {
@@ -132,18 +201,6 @@ private:
       stop ();
     else
       wait_signals ();
-  }
-
-  void
-  handle_accept (const sys::error_code &error, tcp::socket sock)
-  {
-    if (error)
-      throw sys::system_error (error);
-
-    auto sess = session::make (std::move (sock));
-    sess->start ();
-
-    start_accept ();
   }
 
 private:
