@@ -1,4 +1,6 @@
-.cache/
+test/
 build/
-*.out
+.cache/
+
 *.o
+*.out
