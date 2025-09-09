@@ -17,7 +17,7 @@ add_executable(server server.cc)
 #     BOOST_ASIO_HAS_IO_URING=1
 #     BOOST_ASIO_DISABLE_EPOLL=1
 # )
-target_link_libraries(server PRIVATE uring)
+# target_link_libraries(server PRIVATE uring)
 
 add_executable(client client.cc)
 # target_compile_definitions(client
@@ -25,7 +25,7 @@ add_executable(client client.cc)
 #     BOOST_ASIO_HAS_IO_URING=1
 #     BOOST_ASIO_DISABLE_EPOLL=1
 # )
-target_link_libraries(client PRIVATE uring)
+# target_link_libraries(client PRIVATE uring)
 
 add_executable(co_server co_server.cc)
 target_link_libraries(co_server PRIVATE Boost::context)

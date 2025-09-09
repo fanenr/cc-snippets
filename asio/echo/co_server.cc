@@ -10,6 +10,9 @@ namespace sys = boost::system;
 namespace asio = boost::asio;
 using asio::ip::tcp;
 
+constexpr asio::chrono::seconds default_timeout (5);
+constexpr size_t max_receive = 1024;
+
 using allocator_t = boost::context::fixedsize_stack;
 allocator_t allocator (8 * 1024);
 
@@ -31,30 +34,131 @@ public:
     return std::make_shared<session> (std::move (sock));
   }
 
-  explicit session (tcp::socket sock) : socket_ (std::move (sock)) {}
+  explicit session (tcp::socket sock,
+		    asio::chrono::seconds timeout = default_timeout)
+      : socket_ (std::move (sock)), timer_ (socket_.get_executor ()),
+	timeout_ (timeout), strand_ (socket_.get_executor ())
+  {
+  }
 
   void
-  start (asio::yield_context yield)
+  start (bool with_timeout = true)
   {
-    for (;;)
-      {
-	size_t n;
-	sys::error_code ec;
+    if (with_timeout)
+      start_with_timeout ();
+    else
+      start_with_watchdog ();
+  }
 
-	buffer_.resize (1024);
-	n = socket_.async_receive (asio::buffer (buffer_), yield[ec]);
-	if (ec)
-	  break;
+private:
+  void
+  start_with_timeout ()
+  {
+    auto self = shared_from_this ();
+    auto echo = [this, self] (asio::yield_context yield) {
+      for (;;)
+	{
+	  size_t n;
+	  sys::error_code ec;
 
-	buffer_.resize (n);
-	n = asio::async_write (socket_, asio::buffer (buffer_), yield[ec]);
-	if (ec)
-	  break;
-      }
+	  start_timeout ();
+	  buffer_.resize (max_receive);
+	  n = socket_.async_receive (asio::buffer (buffer_), yield[ec]);
+	  timer_.cancel ();
+	  if (ec)
+	    break;
+
+	  start_timeout ();
+	  buffer_.resize (n);
+	  asio::async_write (socket_, asio::buffer (buffer_), yield[ec]);
+	  timer_.cancel ();
+	  if (ec)
+	    break;
+	}
+    };
+    asio::spawn (strand_, std::allocator_arg, allocator, echo, handle_spawn);
+  }
+
+  void
+  start_timeout ()
+  {
+    auto self = shared_from_this ();
+    auto wait = [this, self] (asio::yield_context yield) {
+      timer_.expires_after (timeout_);
+
+      sys::error_code ec;
+      timer_.async_wait (yield[ec]);
+
+      if (!ec)
+	socket_.cancel ();
+    };
+    asio::spawn (strand_, std::allocator_arg, allocator, wait, handle_spawn);
+  }
+
+  void
+  start_with_watchdog ()
+  {
+    auto self = shared_from_this ();
+    auto echo = [this, self] (asio::yield_context yield) {
+      for (;;)
+	{
+	  size_t n;
+	  sys::error_code ec;
+
+	  deadline_ = asio::chrono::steady_clock::now () + timeout_;
+	  buffer_.resize (max_receive);
+	  n = socket_.async_receive (asio::buffer (buffer_), yield[ec]);
+	  if (ec)
+	    {
+	      timer_.cancel ();
+	      break;
+	    }
+
+	  deadline_ = asio::chrono::steady_clock::now () + timeout_;
+	  buffer_.resize (n);
+	  asio::async_write (socket_, asio::buffer (buffer_), yield[ec]);
+	  if (ec)
+	    {
+	      timer_.cancel ();
+	      break;
+	    }
+	}
+    };
+    asio::spawn (strand_, std::allocator_arg, allocator, echo, handle_spawn);
+
+    start_watchdog ();
+  }
+
+  void
+  start_watchdog ()
+  {
+    auto self = shared_from_this ();
+    auto watch = [this, self] (asio::yield_context yield) {
+      for (;;)
+	{
+	  auto now = asio::chrono::steady_clock::now ();
+	  if (now >= deadline_)
+	    {
+	      socket_.cancel ();
+	      break;
+	    }
+
+	  sys::error_code ec;
+	  timer_.expires_at (deadline_);
+	  timer_.async_wait (yield[ec]);
+	  if (ec)
+	    break;
+	}
+    };
+    asio::spawn (strand_, std::allocator_arg, allocator, watch, handle_spawn);
   }
 
 private:
   tcp::socket socket_;
+  asio::steady_timer timer_;
+  asio::chrono::seconds timeout_;
+  asio::steady_timer::time_point deadline_;
+  asio::strand<asio::any_io_executor> strand_;
   std::vector<char> buffer_;
 };
 
@@ -91,10 +195,7 @@ public:
 	{
 	  auto sock = acceptor_.async_accept (yield);
 	  auto sess = session::make (std::move (sock));
-	  auto echo
-	      = [sess] (asio::yield_context yield) { sess->start (yield); };
-	  asio::spawn (io_context_, asio::allocator_arg_t (), allocator, echo,
-		       handle_spawn);
+	  sess->start ();
 	}
     };
 

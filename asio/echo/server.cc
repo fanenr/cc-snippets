@@ -5,10 +5,9 @@
 
 namespace sys = boost::system;
 namespace asio = boost::asio;
-namespace chrono = asio::chrono;
 using asio::ip::tcp;
 
-constexpr chrono::seconds default_timeout (5);
+constexpr asio::chrono::seconds default_timeout (5);
 constexpr size_t max_receive = 1024;
 
 class session : public std::enable_shared_from_this<session>
@@ -23,11 +22,9 @@ public:
   }
 
   explicit session (tcp::socket sock,
-		    chrono::seconds timeout = default_timeout)
+		    asio::chrono::seconds timeout = default_timeout)
       : socket_ (std::move (sock)), timer_ (socket_.get_executor ()),
-	strand_ (static_cast<asio::io_context &> (
-	    socket_.get_executor ().context ())),
-	timeout_ (timeout)
+	timeout_ (timeout), strand_ (socket_.get_executor ())
   {
   }
 
@@ -110,8 +107,8 @@ private:
 private:
   tcp::socket socket_;
   asio::steady_timer timer_;
-  asio::io_context::strand strand_;
-  decltype (timer_)::duration timeout_;
+  asio::chrono::seconds timeout_;
+  asio::strand<asio::any_io_executor> strand_;
   std::vector<char> buffer_;
 };
 
