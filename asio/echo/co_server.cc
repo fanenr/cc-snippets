@@ -1,5 +1,4 @@
 #include <list>
-#include <thread>
 
 #include <boost/asio.hpp>
 #include <boost/asio/spawn.hpp>
@@ -29,15 +28,14 @@ public:
   using pointer = std::shared_ptr<session>;
 
   static pointer
-  make (tcp::socket sock)
+  make (tcp::socket sock, asio::chrono::seconds timeout = default_timeout)
   {
-    return std::make_shared<session> (std::move (sock));
+    return std::make_shared<session> (std::move (sock), timeout);
   }
 
   explicit session (tcp::socket sock,
 		    asio::chrono::seconds timeout = default_timeout)
-      : socket_ (std::move (sock)), timer_ (socket_.get_executor ()),
-	timeout_ (timeout), strand_ (socket_.get_executor ())
+      : socket_ (std::move (sock)), timeout_ (timeout)
   {
   }
 
@@ -55,7 +53,7 @@ private:
   start_with_timeout ()
   {
     auto self = shared_from_this ();
-    auto echo = [this, self] (asio::yield_context yield) {
+    auto echo{ [this, self] (asio::yield_context yield) {
       for (;;)
 	{
 	  size_t n;
@@ -75,7 +73,7 @@ private:
 	  if (ec)
 	    break;
 	}
-    };
+    } };
     asio::spawn (strand_, std::allocator_arg, allocator, echo, handle_spawn);
   }
 
@@ -83,15 +81,15 @@ private:
   start_timeout ()
   {
     auto self = shared_from_this ();
-    auto wait = [this, self] (asio::yield_context yield) {
+    auto wait{ [this, self] (asio::yield_context yield) {
       timer_.expires_after (timeout_);
 
       sys::error_code ec;
       timer_.async_wait (yield[ec]);
 
       if (!ec)
-	socket_.cancel ();
-    };
+	socket_.close ();
+    } };
     asio::spawn (strand_, std::allocator_arg, allocator, wait, handle_spawn);
   }
 
@@ -99,7 +97,7 @@ private:
   start_with_watchdog ()
   {
     auto self = shared_from_this ();
-    auto echo = [this, self] (asio::yield_context yield) {
+    auto echo{ [this, self] (asio::yield_context yield) {
       for (;;)
 	{
 	  size_t n;
@@ -123,7 +121,7 @@ private:
 	      break;
 	    }
 	}
-    };
+    } };
     asio::spawn (strand_, std::allocator_arg, allocator, echo, handle_spawn);
 
     start_watchdog ();
@@ -133,13 +131,13 @@ private:
   start_watchdog ()
   {
     auto self = shared_from_this ();
-    auto watch = [this, self] (asio::yield_context yield) {
+    auto watch{ [this, self] (asio::yield_context yield) {
       for (;;)
 	{
 	  auto now = asio::chrono::steady_clock::now ();
 	  if (now >= deadline_)
 	    {
-	      socket_.cancel ();
+	      socket_.close ();
 	      break;
 	    }
 
@@ -149,103 +147,89 @@ private:
 	  if (ec)
 	    break;
 	}
-    };
+    } };
     asio::spawn (strand_, std::allocator_arg, allocator, watch, handle_spawn);
   }
 
 private:
   tcp::socket socket_;
-  asio::steady_timer timer_;
+  asio::steady_timer timer_{ socket_.get_executor () };
+  asio::strand<asio::any_io_executor> strand_{ socket_.get_executor () };
+
+  std::vector<char> buffer_;
   asio::chrono::seconds timeout_;
   asio::steady_timer::time_point deadline_;
-  asio::strand<asio::any_io_executor> strand_;
-  std::vector<char> buffer_;
 };
 
 class server
 {
 public:
-  explicit server (short port)
-      : signals_ (io_context_, SIGINT, SIGTERM, SIGPIPE),
-	acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
+  explicit server (asio::io_context &io, short port)
+      : acceptor_ (io, tcp::endpoint (tcp::v4 (), port))
   {
-  }
-
-  ~server ()
-  {
-    stop ();
-    wait ();
   }
 
   void
   start ()
   {
-    auto signal = [this] (asio::yield_context yield) {
-      for (;;)
-	{
-	  sys::error_code ec;
-	  int sig = signals_.async_wait (yield[ec]);
-	  if (!ec && (sig == SIGINT || sig == SIGTERM))
-	    stop ();
-	}
-    };
-
-    auto listen = [this] (asio::yield_context yield) {
+    auto listen{ [this] (asio::yield_context yield) {
       for (;;)
 	{
 	  auto sock = acceptor_.async_accept (yield);
 	  auto sess = session::make (std::move (sock));
-	  sess->start ();
+	  sess->start (false);
 	}
-    };
+    } };
 
-    if (!thread_.joinable ())
-      thread_ = std::thread ([this, signal, listen] () {
-	try
-	  {
-	    asio::spawn (io_context_, std::allocator_arg, allocator, signal,
-			 handle_spawn);
-	    asio::spawn (io_context_, std::allocator_arg, allocator, listen,
-			 handle_spawn);
-	    io_context_.run ();
-	  }
-	catch (const std::exception &e)
-	  {
-	    printf ("Exception: %s\n", e.what ());
-	  }
-      });
-  }
-
-  void
-  wait ()
-  {
-    if (thread_.joinable ())
-      thread_.join ();
-  }
-
-  void
-  stop ()
-  {
-    if (!io_context_.stopped ())
-      io_context_.stop ();
+    asio::spawn (acceptor_.get_executor (), std::allocator_arg, allocator,
+		 listen, handle_spawn);
   }
 
 private:
-  asio::io_context io_context_;
-  asio::signal_set signals_;
   tcp::acceptor acceptor_;
-  std::thread thread_;
 };
 
 int
 main ()
 {
-  std::list<server> servers;
-  for (int i = 0; i < 10; i++)
+  try
     {
-      servers.emplace_back (8080 + i);
-      servers.back ().start ();
+      asio::io_context io_context;
+      asio::signal_set signals (io_context, SIGINT, SIGTERM);
+      std::list<server> servers;
+      std::vector<std::thread> threads;
+
+      auto wait{ [&signals, &io_context] (asio::yield_context yield) {
+	signals.async_wait (yield);
+	io_context.stop ();
+      } };
+
+      asio::spawn (io_context, std::allocator_arg, allocator, wait,
+		   handle_spawn);
+
+      for (int i = 0; i < 10; i++)
+	servers.emplace (servers.end (), io_context, 8080 + i)->start ();
+
+      unsigned int num_threads = std::thread::hardware_concurrency ();
+      num_threads = num_threads ? num_threads * 2 : 10;
+      for (unsigned int i = 0; i < num_threads; i++)
+	threads.emplace_back ([&io_context] () {
+	  try
+	    {
+	      io_context.run ();
+	    }
+	  catch (const std::exception &e)
+	    {
+	      printf ("exception: %s\n", e.what ());
+	    }
+	});
+
+      io_context.run ();
+      for (auto &thrd : threads)
+	thrd.join ();
     }
-  for (auto &srv : servers)
-    srv.wait ();
+  catch (const std::exception &e)
+    {
+      printf ("exception: %s\n", e.what ());
+    }
 }

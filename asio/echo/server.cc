@@ -1,5 +1,4 @@
 #include <list>
-#include <thread>
 
 #include <boost/asio.hpp>
 
@@ -16,206 +15,222 @@ public:
   using pointer = std::shared_ptr<session>;
 
   static pointer
-  make (tcp::socket sock)
+  make (tcp::socket sock, asio::chrono::seconds timeout = default_timeout)
   {
-    return std::make_shared<session> (std::move (sock));
+    return std::make_shared<session> (std::move (sock), timeout);
   }
 
   explicit session (tcp::socket sock,
 		    asio::chrono::seconds timeout = default_timeout)
-      : socket_ (std::move (sock)), timer_ (socket_.get_executor ()),
-	timeout_ (timeout), strand_ (socket_.get_executor ())
+      : socket_ (std::move (sock)), timeout_ (timeout)
   {
   }
 
   void
-  start ()
+  start (bool with_timeout = true)
   {
-    buffer_.resize (max_receive);
-    start_receive ();
+    if (with_timeout)
+      start_receive_with_timeout ();
+    else
+      {
+	start_receive_with_watchdog ();
+	start_watchdog ();
+      }
   }
 
 private:
   void
-  start_receive ()
+  start_receive_with_watchdog ()
   {
     auto self = shared_from_this ();
-    socket_.async_receive (
-	asio::buffer (buffer_),
-	asio::bind_executor (
-	    strand_, [this, self] (const sys::error_code &ec, size_t n) {
-	      handle_receive (ec, n);
-	    }));
+    auto handle_receive{ [this, self] (const sys::error_code &error,
+				       size_t bytes) {
+      if (error)
+	{
+	  timer_.cancel ();
+	  return;
+	}
 
-    wait_timeout ();
+      buffer_.resize (bytes);
+      start_send_with_watchdog ();
+    } };
+
+    buffer_.resize (max_receive);
+    socket_.async_receive (asio::buffer (buffer_),
+			   asio::bind_executor (strand_, handle_receive));
+
+    deadline_ = asio::chrono::steady_clock::now () + timeout_;
   }
 
   void
-  handle_receive (const sys::error_code &error, size_t bytes)
-  {
-    if (error)
-      return;
-
-    timer_.cancel ();
-
-    buffer_.resize (bytes);
-    start_send ();
-  }
-
-  void
-  start_send ()
+  start_send_with_watchdog ()
   {
     auto self = shared_from_this ();
-    asio::async_write (
-	socket_, asio::buffer (buffer_),
-	asio::bind_executor (
-	    strand_, [this, self] (const sys::error_code &ec, size_t n) {
-	      handle_send (ec, n);
-	    }));
+    auto handle_write{ [this, self] (const sys::error_code &error,
+				     size_t /*bytes*/) {
+      if (error)
+	{
+	  timer_.cancel ();
+	  return;
+	}
 
-    wait_timeout ();
+      start_receive_with_watchdog ();
+    } };
+
+    asio::async_write (socket_, asio::buffer (buffer_),
+		       asio::bind_executor (strand_, handle_write));
+
+    deadline_ = asio::chrono::steady_clock::now () + timeout_;
   }
 
   void
-  handle_send (const sys::error_code &error, size_t /*bytes*/)
+  start_watchdog ()
   {
-    if (error)
-      return;
+    auto now = asio::chrono::steady_clock::now ();
+    if (now >= deadline_)
+      {
+	socket_.close ();
+	return;
+      }
 
-    timer_.cancel ();
+    auto self = shared_from_this ();
+    auto handle_wait{ [this] (const sys::error_code &error) {
+      if (!error)
+	start_watchdog ();
+    } };
 
-    start ();
+    timer_.expires_at (deadline_);
+    timer_.async_wait (asio::bind_executor (strand_, handle_wait));
   }
 
   void
-  wait_timeout ()
+  start_receive_with_timeout ()
   {
     auto self = shared_from_this ();
+    auto handle_receive{ [this, self] (const sys::error_code &error,
+				       size_t bytes) {
+      timer_.cancel ();
+      if (error)
+	return;
+
+      buffer_.resize (bytes);
+      start_send_with_timeout ();
+    } };
+
+    buffer_.resize (max_receive);
+    socket_.async_receive (asio::buffer (buffer_),
+			   asio::bind_executor (strand_, handle_receive));
+
+    start_timeout ();
+  }
+
+  void
+  start_send_with_timeout ()
+  {
+    auto self = shared_from_this ();
+    auto handle_write{ [this, self] (const sys::error_code &error,
+				     size_t /*bytes*/) {
+      timer_.cancel ();
+      if (error)
+	return;
+
+      start_receive_with_timeout ();
+    } };
+
+    asio::async_write (socket_, asio::buffer (buffer_),
+		       asio::bind_executor (strand_, handle_write));
+
+    start_timeout ();
+  }
+
+  void
+  start_timeout ()
+  {
+    auto self = shared_from_this ();
+    auto handle_wait{ [this, self] (const sys::error_code &error) {
+      if (!error)
+	socket_.close ();
+    } };
+
     timer_.expires_after (timeout_);
-    timer_.async_wait (asio::bind_executor (
-	strand_,
-	[this, self] (const sys::error_code &ec) { handle_timeout (ec); }));
-  }
-
-  void
-  handle_timeout (const sys::error_code &error)
-  {
-    if (!error)
-      socket_.cancel ();
+    timer_.async_wait (asio::bind_executor (strand_, handle_wait));
   }
 
 private:
   tcp::socket socket_;
-  asio::steady_timer timer_;
-  asio::chrono::seconds timeout_;
-  asio::strand<asio::any_io_executor> strand_;
+  asio::steady_timer timer_{ socket_.get_executor () };
+  asio::strand<asio::any_io_executor> strand_{ socket_.get_executor () };
+
   std::vector<char> buffer_;
+  asio::chrono::seconds timeout_;
+  asio::steady_timer::time_point deadline_;
 };
 
 class server
 {
 public:
-  explicit server (short port)
-      : signals_ (io_context_, SIGINT, SIGTERM, SIGPIPE),
-	acceptor_ (io_context_, tcp::endpoint (tcp::v4 (), port))
+  explicit server (asio::io_context &io, short port)
+      : acceptor_ (io, tcp::endpoint (tcp::v4 (), port))
   {
-    wait_signals ();
-  }
-
-  ~server ()
-  {
-    stop ();
-    wait ();
   }
 
   void
   start ()
   {
-    if (thread_.joinable ())
-      return;
+    auto handle_accept{ [this] (const sys::error_code &error,
+				tcp::socket sock) {
+      if (error)
+	return;
 
-    thread_ = std::thread ([this] () {
-      try
-	{
-	  start_accept ();
-	  io_context_.run ();
-	}
-      catch (const std::exception &e)
-	{
-	  printf ("Exception: %s\n", e.what ());
-	}
-    });
-  }
+      auto sess = session::make (std::move (sock));
+      sess->start (false);
 
-  void
-  wait ()
-  {
-    if (thread_.joinable ())
-      thread_.join ();
-  }
+      start ();
+    } };
 
-  void
-  stop ()
-  {
-    if (!io_context_.stopped ())
-      io_context_.stop ();
+    acceptor_.async_accept (handle_accept);
   }
 
 private:
-  void
-  start_accept ()
-  {
-    acceptor_.async_accept (
-	[this] (const sys::error_code &ec, tcp::socket sock) {
-	  handle_accept (ec, std::move (sock));
-	});
-  }
-
-  void
-  handle_accept (const sys::error_code &error, tcp::socket sock)
-  {
-    if (error)
-      throw sys::system_error (error);
-
-    auto sess = session::make (std::move (sock));
-    sess->start ();
-
-    start_accept ();
-  }
-
-  void
-  wait_signals ()
-  {
-    signals_.async_wait ([this] (const sys::error_code &ec, int sig) {
-      handle_signals (ec, sig);
-    });
-  }
-
-  void
-  handle_signals (const sys::error_code &error, int signum)
-  {
-    if (!error && (signum == SIGINT || signum == SIGTERM))
-      stop ();
-    else
-      wait_signals ();
-  }
-
-private:
-  asio::io_context io_context_;
-  asio::signal_set signals_;
   tcp::acceptor acceptor_;
-  std::thread thread_;
 };
 
 int
 main ()
 {
-  std::list<server> servers;
-  for (int i = 0; i < 10; i++)
+  try
     {
-      servers.emplace_back (8080 + i);
-      servers.back ().start ();
+      asio::io_context io_context;
+      asio::signal_set signals (io_context, SIGINT, SIGTERM);
+      std::list<server> servers;
+      std::vector<std::thread> threads;
+
+      signals.async_wait ([&] (const sys::error_code & /*error*/,
+			       int /*signum*/) { io_context.stop (); });
+
+      for (int i = 0; i < 10; i++)
+	servers.emplace (servers.end (), io_context, 8080 + i)->start ();
+
+      unsigned int num_threads = std::thread::hardware_concurrency ();
+      num_threads = num_threads ? num_threads * 2 : 10;
+      for (unsigned int i = 0; i < num_threads; i++)
+	threads.emplace_back ([&io_context] () {
+	  try
+	    {
+	      io_context.run ();
+	    }
+	  catch (const std::exception &e)
+	    {
+	      std::printf ("exception: %s\n", e.what ());
+	    }
+	});
+
+      io_context.run ();
+      for (auto &thrd : threads)
+	thrd.join ();
     }
-  for (auto &srv : servers)
-    srv.wait ();
+  catch (const std::exception &e)
+    {
+      std::printf ("exception: %s\n", e.what ());
+    }
 }

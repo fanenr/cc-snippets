@@ -1,4 +1,5 @@
 ---
 BasedOnStyle: GNU
+BreakTemplateDeclarations: Yes
 UseTab: Always
 ...
