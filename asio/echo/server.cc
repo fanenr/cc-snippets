@@ -4,10 +4,11 @@
 
 namespace sys = boost::system;
 namespace asio = boost::asio;
+namespace chrono = asio::chrono;
 using asio::ip::tcp;
 
-constexpr asio::chrono::seconds default_timeout (5);
-constexpr size_t max_receive = 1024;
+constexpr chrono::seconds default_timeout (5);
+constexpr size_t buffer_size = 1024;
 
 class session : public std::enable_shared_from_this<session>
 {
@@ -15,13 +16,14 @@ public:
   using pointer = std::shared_ptr<session>;
 
   static pointer
-  make (tcp::socket sock, asio::chrono::seconds timeout = default_timeout)
+  make (tcp::socket sock,
+	chrono::steady_clock::duration timeout = default_timeout)
   {
     return std::make_shared<session> (std::move (sock), timeout);
   }
 
   explicit session (tcp::socket sock,
-		    asio::chrono::seconds timeout = default_timeout)
+		    chrono::steady_clock::duration timeout = default_timeout)
       : socket_ (std::move (sock)), timeout_ (timeout)
   {
   }
@@ -30,63 +32,60 @@ public:
   start (bool with_timeout = true)
   {
     if (with_timeout)
-      start_receive_with_timeout ();
+      receive_with_timeout ();
     else
       {
-	start_receive_with_watchdog ();
+	receive_with_watchdog ();
 	start_watchdog ();
       }
   }
 
 private:
   void
-  start_receive_with_watchdog ()
+  receive_with_watchdog ()
   {
     auto self = shared_from_this ();
-    auto handle_receive{ [this, self] (const sys::error_code &error,
-				       size_t bytes) {
+    auto handle_receive{ [self] (const sys::error_code &error, size_t bytes) {
       if (error)
 	{
-	  timer_.cancel ();
+	  self->timer_.cancel ();
 	  return;
 	}
 
-      buffer_.resize (bytes);
-      start_send_with_watchdog ();
+      self->send_with_watchdog (bytes);
     } };
 
-    buffer_.resize (max_receive);
     socket_.async_receive (asio::buffer (buffer_),
 			   asio::bind_executor (strand_, handle_receive));
 
-    deadline_ = asio::chrono::steady_clock::now () + timeout_;
+    deadline_ = chrono::steady_clock::now () + timeout_;
   }
 
   void
-  start_send_with_watchdog ()
+  send_with_watchdog (size_t bytes_to_send)
   {
     auto self = shared_from_this ();
-    auto handle_write{ [this, self] (const sys::error_code &error,
-				     size_t /*bytes*/) {
+    auto handle_write{ [self] (const sys::error_code &error,
+			       size_t /*bytes*/) {
       if (error)
 	{
-	  timer_.cancel ();
+	  self->timer_.cancel ();
 	  return;
 	}
 
-      start_receive_with_watchdog ();
+      self->receive_with_watchdog ();
     } };
 
-    asio::async_write (socket_, asio::buffer (buffer_),
+    asio::async_write (socket_, asio::buffer (buffer_, bytes_to_send),
 		       asio::bind_executor (strand_, handle_write));
 
-    deadline_ = asio::chrono::steady_clock::now () + timeout_;
+    deadline_ = chrono::steady_clock::now () + timeout_;
   }
 
   void
   start_watchdog ()
   {
-    auto now = asio::chrono::steady_clock::now ();
+    auto now = chrono::steady_clock::now ();
     if (now >= deadline_)
       {
 	socket_.close ();
@@ -94,9 +93,9 @@ private:
       }
 
     auto self = shared_from_this ();
-    auto handle_wait{ [this] (const sys::error_code &error) {
+    auto handle_wait{ [self] (const sys::error_code &error) {
       if (!error)
-	start_watchdog ();
+	self->start_watchdog ();
     } };
 
     timer_.expires_at (deadline_);
@@ -104,20 +103,17 @@ private:
   }
 
   void
-  start_receive_with_timeout ()
+  receive_with_timeout ()
   {
     auto self = shared_from_this ();
-    auto handle_receive{ [this, self] (const sys::error_code &error,
-				       size_t bytes) {
-      timer_.cancel ();
+    auto handle_receive{ [self] (const sys::error_code &error, size_t bytes) {
+      self->timer_.cancel ();
       if (error)
 	return;
 
-      buffer_.resize (bytes);
-      start_send_with_timeout ();
+      self->send_with_timeout (bytes);
     } };
 
-    buffer_.resize (max_receive);
     socket_.async_receive (asio::buffer (buffer_),
 			   asio::bind_executor (strand_, handle_receive));
 
@@ -125,19 +121,19 @@ private:
   }
 
   void
-  start_send_with_timeout ()
+  send_with_timeout (size_t bytes_to_send)
   {
     auto self = shared_from_this ();
-    auto handle_write{ [this, self] (const sys::error_code &error,
-				     size_t /*bytes*/) {
-      timer_.cancel ();
+    auto handle_write{ [self] (const sys::error_code &error,
+			       size_t /*bytes*/) {
+      self->timer_.cancel ();
       if (error)
 	return;
 
-      start_receive_with_timeout ();
+      self->receive_with_timeout ();
     } };
 
-    asio::async_write (socket_, asio::buffer (buffer_),
+    asio::async_write (socket_, asio::buffer (buffer_, bytes_to_send),
 		       asio::bind_executor (strand_, handle_write));
 
     start_timeout ();
@@ -147,9 +143,9 @@ private:
   start_timeout ()
   {
     auto self = shared_from_this ();
-    auto handle_wait{ [this, self] (const sys::error_code &error) {
+    auto handle_wait{ [self] (const sys::error_code &error) {
       if (!error)
-	socket_.close ();
+	self->socket_.close ();
     } };
 
     timer_.expires_after (timeout_);
@@ -161,16 +157,21 @@ private:
   asio::steady_timer timer_{ socket_.get_executor () };
   asio::strand<asio::any_io_executor> strand_{ socket_.get_executor () };
 
-  std::vector<char> buffer_;
-  asio::chrono::seconds timeout_;
+  chrono::steady_clock::duration timeout_;
   asio::steady_timer::time_point deadline_;
+  std::array<char, buffer_size> buffer_;
 };
 
 class server
 {
 public:
-  explicit server (asio::io_context &io, short port)
-      : acceptor_ (io, tcp::endpoint (tcp::v4 (), port))
+  server (asio::any_io_executor ex, const tcp::endpoint &ep)
+      : acceptor_ (ex, ep)
+  {
+  }
+
+  server (asio::any_io_executor ex, short port)
+      : server (ex, tcp::endpoint (tcp::v4 (), port))
   {
   }
 
@@ -208,8 +209,9 @@ main ()
       signals.async_wait ([&] (const sys::error_code & /*error*/,
 			       int /*signum*/) { io_context.stop (); });
 
+      auto executor = io_context.get_executor ();
       for (int i = 0; i < 10; i++)
-	servers.emplace (servers.end (), io_context, 8080 + i)->start ();
+	servers.emplace (servers.end (), executor, 8080 + i)->start ();
 
       unsigned int num_threads = std::thread::hardware_concurrency ();
       num_threads = num_threads ? num_threads * 2 : 10;
