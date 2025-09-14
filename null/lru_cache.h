@@ -13,7 +13,9 @@ class lru_cache
   using list_iterator = typename std::list<value_type>::iterator;
 
 public:
-  explicit lru_cache (size_t capacity) : capacity_ (capacity)
+  using size_type = size_t;
+
+  explicit lru_cache (size_type capacity) : capacity_ (capacity)
   {
     if (capacity_ == 0)
       throw std::invalid_argument ("LRUCache capacity must be positive.");
@@ -63,7 +65,7 @@ public:
   }
 
 private:
-  size_t capacity_;
+  size_type capacity_;
   std::list<value_type> list_;
   std::unordered_map<K, list_iterator> map_;
 };
