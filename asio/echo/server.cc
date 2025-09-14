@@ -42,16 +42,22 @@ public:
 
 private:
   void
+  stop ()
+  {
+    socket_.close ();
+    timer_.cancel ();
+  }
+
+  void
   receive_with_watchdog ()
   {
     auto self = shared_from_this ();
     auto handle_receive{ [self] (const sys::error_code &error, size_t bytes) {
       if (error)
 	{
-	  self->timer_.cancel ();
+	  self->stop ();
 	  return;
 	}
-
       self->send_with_watchdog (bytes);
     } };
 
@@ -69,10 +75,9 @@ private:
 			       size_t /*bytes*/) {
       if (error)
 	{
-	  self->timer_.cancel ();
+	  self->stop ();
 	  return;
 	}
-
       self->receive_with_watchdog ();
     } };
 
@@ -88,7 +93,7 @@ private:
     auto now = chrono::steady_clock::now ();
     if (now >= deadline_)
       {
-	socket_.close ();
+	stop ();
 	return;
       }
 
@@ -109,8 +114,10 @@ private:
     auto handle_receive{ [self] (const sys::error_code &error, size_t bytes) {
       self->timer_.cancel ();
       if (error)
-	return;
-
+	{
+	  self->stop ();
+	  return;
+	}
       self->send_with_timeout (bytes);
     } };
 
@@ -128,8 +135,10 @@ private:
 			       size_t /*bytes*/) {
       self->timer_.cancel ();
       if (error)
-	return;
-
+	{
+	  self->stop ();
+	  return;
+	}
       self->receive_with_timeout ();
     } };
 
@@ -145,7 +154,7 @@ private:
     auto self = shared_from_this ();
     auto handle_wait{ [self] (const sys::error_code &error) {
       if (!error)
-	self->socket_.close ();
+	self->stop ();
     } };
 
     timer_.expires_after (timeout_);
@@ -157,8 +166,8 @@ private:
   asio::steady_timer timer_{ socket_.get_executor () };
   asio::strand<asio::any_io_executor> strand_{ socket_.get_executor () };
 
-  chrono::steady_clock::duration timeout_;
   asio::steady_timer::time_point deadline_;
+  chrono::steady_clock::duration timeout_;
   std::array<char, buffer_size> buffer_;
 };
 

@@ -10,39 +10,32 @@ constexpr size_t buffer_size = 1024;
 class watchdog
 {
 public:
-  using callback = std::function<void ()>;
-
   explicit watchdog (asio::any_io_executor ex) : timer_ (ex) {}
 
-  watchdog (asio::any_io_executor ex, callback cb)
-      : timer_ (ex), callback_ (std::move (cb))
-  {
-  }
-
+  template <typename Callback>
   void
-  start (callback cb)
-  {
-    callback_ = std::move (cb);
-    start ();
-  }
-
-  void
-  start ()
+  start (Callback cb)
   {
     auto now = asio::chrono::steady_clock::now ();
     if (now >= deadline_)
       {
-	callback_ ();
+	cb ();
 	return;
       }
 
-    auto handle_wait{ [this] (const sys::error_code &error) {
+    auto handle_wait{ [this, cb] (const sys::error_code &error) {
       if (!error)
-	start ();
+	start (cb);
     } };
 
     timer_.expires_at (deadline_);
     timer_.async_wait (handle_wait);
+  }
+
+  void
+  stop ()
+  {
+    timer_.cancel ();
   }
 
   void
@@ -54,7 +47,6 @@ public:
 private:
   asio::steady_timer timer_;
   asio::steady_timer::time_point deadline_;
-  callback callback_;
 };
 
 class session : public std::enable_shared_from_this<session>
@@ -93,12 +85,24 @@ public:
 
 private:
   void
+  stop ()
+  {
+    client_.close ();
+    server_.close ();
+    watchdog1_.stop ();
+    watchdog2_.stop ();
+  }
+
+  void
   receive_from_client ()
   {
     auto self = shared_from_this ();
     auto handle_receive{ [self] (const sys::error_code &error, size_t bytes) {
       if (error)
-	return;
+	{
+	  self->stop ();
+	  return;
+	}
       self->send_to_server (bytes);
     } };
 
@@ -114,7 +118,10 @@ private:
     auto handle_write{ [self] (const sys::error_code &error,
 			       size_t /*bytes*/) {
       if (error)
-	return;
+	{
+	  self->stop ();
+	  return;
+	}
       self->receive_from_client ();
     } };
 
@@ -129,7 +136,10 @@ private:
     auto self = shared_from_this ();
     auto handle_receive{ [self] (const sys::error_code &error, size_t bytes) {
       if (error)
-	return;
+	{
+	  self->stop ();
+	  return;
+	}
       self->send_to_client (bytes);
     } };
 
@@ -145,7 +155,10 @@ private:
     auto handle_write{ [self] (const sys::error_code &error,
 			       size_t /*bytes*/) {
       if (error)
-	return;
+	{
+	  self->stop ();
+	  return;
+	}
       self->receive_from_server ();
     } };
 
@@ -157,10 +170,8 @@ private:
   void
   start_watchdogs ()
   {
-    auto callback{ [this] () {
-      client_.close ();
-      server_.close ();
-    } };
+    auto self = shared_from_this ();
+    auto callback{ [self] () { self->stop (); } };
 
     watchdog1_.start (callback);
     watchdog2_.start (callback);
