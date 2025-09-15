@@ -1,12 +1,13 @@
-#ifndef LRU_CACHE_H
-#define LRU_CACHE_H
+#ifndef CONCURRENT_LRU_CACHE_H
+#define CONCURRENT_LRU_CACHE_H
 
 #include <list>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 
 template <typename K, typename V>
-class lru_cache
+class concurrent_lru_cache
 {
   using value_type = std::pair<K, V>;
   using list_iterator = typename std::list<value_type>::iterator;
@@ -14,7 +15,7 @@ class lru_cache
 public:
   using size_type = size_t;
 
-  explicit lru_cache (size_type capacity) : capacity_ (capacity)
+  explicit concurrent_lru_cache (size_type capacity) : capacity_ (capacity)
   {
     if (capacity_ == 0)
       throw std::invalid_argument ("LRUCache capacity must be positive.");
@@ -23,6 +24,8 @@ public:
   V *
   get (const K &key)
   {
+    std::lock_guard<std::mutex> lock (mutex_);
+
     auto it = map_.find (key);
     if (it == map_.end ())
       return nullptr;
@@ -34,8 +37,9 @@ public:
   void
   put (const K &key, V value)
   {
-    auto it = map_.find (key);
+    std::lock_guard<std::mutex> lock (mutex_);
 
+    auto it = map_.find (key);
     if (it != map_.end ())
       {
 	auto list_it = it->second;
@@ -58,6 +62,7 @@ private:
   size_type capacity_;
   std::list<value_type> list_;
   std::unordered_map<K, list_iterator> map_;
+  std::mutex mutex_;
 };
 
-#endif // LRU_CACHE_H
+#endif // CONCURRENT_LRU_CACHE_H

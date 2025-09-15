@@ -1,14 +1,11 @@
 #ifndef CONCURRENT_BLOCKING_QUEUE_H
 #define CONCURRENT_BLOCKING_QUEUE_H
 
-#include <queue>
+#include <deque>
 #include <mutex>
 #include <limits>
-#include <atomic>
-#include <chrono>
 #include <utility>
 #include <optional>
-#include <iostream>
 #include <condition_variable>
 
 template <typename T>
