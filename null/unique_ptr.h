@@ -74,18 +74,15 @@ template <typename T, typename Deleter,
 					delete_wrapper<T, Deleter>>::type,
 	  typename
 	  = decltype (std::declval<DeleterType> () (static_cast<T *> (0)))>
-struct unique_ptr_base
-{
-  using type = DeleterType;
-};
+using unique_ptr_base = DeleterType;
 
 template <typename T, typename Deleter = default_delete<T>>
-class unique_ptr : private unique_ptr_base<T, Deleter>::type
+class unique_ptr : private unique_ptr_base<T, Deleter>
 {
   template <typename Y, typename D>
   friend class unique_ptr;
 
-  using base_type = typename unique_ptr_base<T, Deleter>::type;
+  using base_type = unique_ptr_base<T, Deleter>;
 
 public:
   using pointer = T *;
