@@ -1,6 +1,5 @@
 ---
 BasedOnStyle: GNU
-BreakTemplateDeclarations: true
-SortIncludes: false
+BreakTemplateDeclarations: Yes
 UseTab: Always
 ...
